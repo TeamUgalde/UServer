@@ -30,3 +30,12 @@
 
 # Debug files
 *.dSYM/
+
+#Codeblocks
+*.depend
+*.layout
+*.cbp
+
+#Object and executables folders
+bin/*
+obj/*
