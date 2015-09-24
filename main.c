@@ -5,13 +5,16 @@
 #include "netinet/in.h"
 
 #define BACKLOG 64
+#define BUFFER_SIZE 8096;
 
 //Global variables.
 int port, mode, processAmount, fd, socketfd, requestfd;
-char resourcePath[200];
+char resourcePath[300];
 
 socklen_t socketLength;
 static struct sockaddr_in clientAddr, serverAddr;
+
+static char buffer[BUFFER_SIZE + 1];
 
 
 void initializeServer() {
@@ -38,11 +41,64 @@ void initializeServer() {
     }
 }
 
-void fifo() {}
-void forked() {}
-void threaded() {}
-void preForked() {}
-void preThreaded() {}
+char[] getResourceString(int bytesRead) {
+    for(int i = 0; i < bytesRead; i++) {
+        if(buffer[i] == '\n' || buffer[i] == '\r') buffer[i]='$';
+    }
+    int index = 0;
+    char resource[200];
+    for(int i = 4; i < BUFFER_SIZE; i++) {
+		if(buffer[i] == ' ') break;
+		resource[index++] = buffer[i];
+	}
+	return resource;
+}
+
+void processRequest(void* fd) {
+    int requestfd = *((int *)) fd);
+    int bytesRead, filefd;
+    bytesRead = read(requestfd, buffer, BUFFER_SIZE);
+
+    if(bytesRead < 1) {
+        printf("Error al leer la solicitud, devolver error http");
+    }
+    if(bytesRead > 0 && bytesRead < BUFFER_SIZE) {
+        buffer[bytesRead] = 0;
+    }
+
+    char resource[100];
+    strcpy(resource, getResourceString(bytesRead));
+    strcat(resourcePath, resource);
+
+    if((filefd = open(&resourcePath, O_RDONLY)) == -1) {
+		printf("Error al abrir el recurso, devolver error http");
+	}
+	while((bytesRead = read(filefd, buffer, BUFFER_SIZE)) > 0) {
+		(void) write(requestfd, buffer, bytesRead);
+	}
+	close(requestfd);
+	exit(1);
+}
+
+void fifo() {
+
+}
+
+void forked() {
+
+}
+
+void threaded() {
+
+}
+
+void preForked() {
+
+}
+
+void preThreaded() {
+
+}
 
 
 int main(int argc, char ** argv) {
