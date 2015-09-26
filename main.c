@@ -95,11 +95,39 @@ void fifo() {
 }
 
 void forked() {
-
+    int processId;
+    (void)signal(SIGCLD, SIG_IGN); /* ignore child death */
+    (void)signal(SIGHUP, SIG_IGN); /* ignore terminal hangups */
+    while(1){
+        socketLength = sizeof(clientAddr);
+        if ((connectionfd = accept(socketfd, (struct sockaddr *) &clientAddr, &socketLength)) == -1) {
+            printf("Error al aceptar la conexión.\n\n");
+        }else {
+            processId = fork();
+            if (processId < 0) {
+                printf("Error al crear el proceso.\n\n");
+            }
+            else if (processId == 0) {
+                processRequest((void *)&connectionfd);
+                exit(0);
+            }
+            else {
+                close(connectionfd);
+            }
+        }
+    }
 }
 
 void threaded() {
-
+    while(1){
+        socketLength = sizeof(clientAddr);
+        if ((connectionfd = accept(socketfd, (struct sockaddr *) &clientAddr, &socketLength)) == -1) {
+            printf("Error al aceptar la conexión.\n\n");
+        }else {
+            pthread_t thread;
+            pthread_create(&thread, NULL, processRequest, (void*)&connectionfd);
+        }
+    }
 }
 
 void preForked() {
