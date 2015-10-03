@@ -6,28 +6,76 @@
 #include <fcntl.h>
 #include "signal.h"
 #include <unistd.h>
+#include "uthash.h"
+#include <sys/mman.h>
 
 #define BACKLOG 64
 #define BUFFER_SIZE 8096
 #define MAX_REQUESTS 100
 
+//File name and the number of times that it has been requested.
+typedef struct file {
+    char  name[30];
+    int count;
+    UT_hash_handle hh;
+}file_t;
+
 //Global variables.
 int port, mode, processAmount, socketfd;
 char resourcePath[200];
 char userInput[10];
-
 socklen_t socketLength;
 static struct sockaddr_in clientAddr, serverAddr;
 
-//Variables for threads
+//Variables for threads work.
 pthread_mutex_t cliMutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mapMutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cliCond = PTHREAD_COND_INITIALIZER;
 int	get, processed;
 int requests[MAX_REQUESTS];
 
+//FileMap using uthash. It stores files information.
+static file_t *fileMap;
+
+
+//-------------------------------------------------------------------------------------
+//Returns the number of times that a file has been requested.
+int getFileRequests(char *requestedFile) {
+    file_t *f;
+    int res;
+
+    HASH_FIND_STR(fileMap, requestedFile, f);
+    if (f==NULL) {
+      f = (file_t*)malloc(sizeof(file_t));
+      f->count = res = 1;
+      strcpy(f->name, requestedFile);
+      HASH_ADD_STR(fileMap, name, f);
+    }else{
+        res = ++f->count;
+    }
+    return res;
+}
+
+
+//-------------------------------------------------------------------------------------
+// Prints requested file information.
+void printRequestInfo(char *resource) {
+    if(mode != 2 && mode != 4) {
+        pthread_mutex_lock(&mapMutex);
+        printf("Se solicitó el recurso: %s (%d)\n", resource, getFileRequests(resource));
+        pthread_mutex_unlock(&mapMutex);
+    }else {
+        printf("Se solicitó el recurso: %s\n", resource);
+    }
+}
+
+
+//-------------------------------------------------------------------------------------
+// Initializes the server socket. After this function the server will be listening for requests.
 void initializeServer() {
+    //Request a new socket.
     if((socketfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-        printf("Error al abrir el socket.\n\n");
+        printf("Error al abrir el socket del servidor.\n\n");
         exit(-1);
     }
 
@@ -48,56 +96,77 @@ void initializeServer() {
         exit(-1);
     }
 
+    //This variable will be needed when accepting requests.
     socketLength = sizeof(clientAddr);
 }
 
+
+//-------------------------------------------------------------------------------------
+// Returns 1 if the userInput is equals to 'fin'
 int isFin() {
     return (strlen(userInput) == 3 && userInput[0] == 'f' && userInput[1] == 'i' && userInput[2] == 'n');
 }
 
-const char *getResourceString(int bytesRead, char* buffer) {
+
+//-------------------------------------------------------------------------------------
+// Returns the whole path to the requested resource.
+const char *getResourcePath(char* resource) {
+    char *path = (char*) malloc(400 * sizeof(char));
+    strcat(path, resourcePath);
+	strcat(path, resource);
+	return path;
+}
+
+
+//-------------------------------------------------------------------------------------
+// Returns a string containing the name of the requested resource.
+char *getResourceString(int bytesRead, char* buffer) {
     for(int i = 0; i < bytesRead; i++) {
         if(buffer[i] == '\n' || buffer[i] == '\r') buffer[i]='$';
     }
     int index = 0;
-    char *resource = (char*) malloc(400 * sizeof(char));
-    char temp[100];
+    char *temp = (char*) malloc(100 * sizeof(char));
     for(int i = 4; i < BUFFER_SIZE; i++) {
 		if(buffer[i] == ' ') break;
 		temp[index++] = buffer[i];
 	}
 	temp[index] = 0;
-	strcat(resource, resourcePath);
-	strcat(resource, temp);
-	return resource;
+	return temp;
 }
 
+
+//-------------------------------------------------------------------------------------
+// This function process the incoming request and writes the response into the client socket.
 void* processRequest(void* fd) {
     char buffer[BUFFER_SIZE + 1];
     int requestfd = *((int *) fd);
     int bytesRead, filefd;
     bytesRead = read(requestfd, buffer, BUFFER_SIZE);
     if(bytesRead < 1) {
-        printf("Oh dear, something went wrong with read()! %s\n", strerror(errno));
-        printf("Error al leer la solicitud, devolver error http. \n\n");
+        printf("Error al leer la solicitud. \n\n");
         return NULL;
     }
-    if(bytesRead > 0 && bytesRead < BUFFER_SIZE) {
-        buffer[bytesRead] = 0;
-    }
+    if(bytesRead > 0 && bytesRead < BUFFER_SIZE) buffer[bytesRead] = 0;
 
-    if((filefd = open(getResourceString(bytesRead, buffer), O_RDONLY)) == -1) {
-		printf("Error al abrir el recurso, devolver error http \n\n");
-	}
+    char * resource = getResourceString(bytesRead, buffer);
 
-	while((bytesRead = read(filefd, buffer, BUFFER_SIZE)) > 0) {
-		(void) write(requestfd, buffer, bytesRead);
+    if((filefd = open(getResourcePath(resource), O_RDONLY)) == -1) {
+        char error[] = "HTTP/1.1 404 Not Found\nContent-Length: 136\nConnection: close\nContent-Type: text/html\n\n<html><head>\n<title>404 Not Found</title>\n</head><body>\n<h1>Not Found</h1>\nThe requested URL was not found on this server.\n</body></html>\n";
+        write(requestfd, error, 224);
+		printf("Error al abrir el recurso %s.\n", resource);
+	}else {
+		while((bytesRead = read(filefd, buffer, BUFFER_SIZE)) > 0) {
+            (void) write(requestfd, buffer, bytesRead);
+        }
 	}
 
 	close(requestfd);
+    printRequestInfo(resource);
 	return NULL;
 }
 
+
+//-------------------------------------------------------------------------------------
 void fifo() {
     int connectionfd;
     while(1) {
@@ -109,6 +178,8 @@ void fifo() {
     }
 }
 
+
+//-------------------------------------------------------------------------------------
 void forked() {
     int connectionfd;
     pid_t processId;
@@ -129,6 +200,8 @@ void forked() {
     }
 }
 
+
+//-------------------------------------------------------------------------------------
 void threaded() {
     int *confd, connectionfd;
     while(1){
@@ -140,13 +213,15 @@ void threaded() {
             pthread_t thread;
             if(pthread_create(&thread, NULL, &processRequest, (void*) confd)) {
                 close(connectionfd);
-                printf("Error al crear nuevo hilo\n");
+                printf("Error al crear nuevo hilo.\n");
                 exit(0);
             }
         }
     }
 }
 
+
+//-------------------------------------------------------------------------------------
 void preForked() {
     int connectionfd;
     pid_t processIds[processAmount];
@@ -164,10 +239,12 @@ void preForked() {
             }
         }
     }
-
-    while(scanf("%s", userInput),!isFin());
+    while(1) pause();
 }
 
+
+//-------------------------------------------------------------------------------------
+//Thread function, it waits for an incoming request.
 void* threadRun() {
     int *connectionfd = malloc(sizeof(int));
 	pthread_detach(pthread_self());
@@ -206,7 +283,11 @@ void preThreaded() {
     }
 }
 
+
+//-------------------------------------------------------------------------------------
+//Initializes server and attends requests depending on the mode.
 void* startServer() {
+
     initializeServer();
 
     switch(mode) {
@@ -231,6 +312,7 @@ void* startServer() {
     return NULL;
 }
 
+
 int main(int argc, char ** argv) {
 
     if(argc < 4 || argc > 5) printf("Número inválido de argumentos.\n\n");
@@ -245,7 +327,7 @@ int main(int argc, char ** argv) {
         pthread_t main_thread;
         pthread_create(&main_thread, NULL, &startServer, NULL);
 
-        //Waits until the user enters the exit word.
+        //Waits until user enters the exit word.
         while(scanf("%s", userInput),!isFin());
         if(mode == 4) kill(0, SIGTERM);
     }
