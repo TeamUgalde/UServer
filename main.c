@@ -6,7 +6,6 @@
 #include <fcntl.h>
 #include "signal.h"
 #include <unistd.h>
-#include <errno.h>
 
 #define BACKLOG 64
 #define BUFFER_SIZE 8096
@@ -167,8 +166,6 @@ void preForked() {
     }
 
     while(scanf("%s", userInput),!isFin());
-    for(int i = 0; i < processAmount; i++) kill(processIds[i], SIGTERM);
-    exit(0);
 }
 
 void* threadRun() {
@@ -209,6 +206,31 @@ void preThreaded() {
     }
 }
 
+void* startServer() {
+    initializeServer();
+
+    switch(mode) {
+        case 1:
+            fifo();
+            break;
+        case 2:
+            forked();
+            break;
+        case 3:
+            threaded();
+            break;
+        case 4:
+            preForked();
+            break;
+        case 5:
+            preThreaded();
+            break;
+        default :
+            printf("Modo inválido.\n\n");
+    }
+    return NULL;
+}
+
 int main(int argc, char ** argv) {
 
     if(argc < 4 || argc > 5) printf("Número inválido de argumentos.\n\n");
@@ -219,27 +241,13 @@ int main(int argc, char ** argv) {
         mode = atoi(argv[3]);
         if(argc == 5) processAmount = atoi(argv[4]);
 
-        initializeServer();
+        //Create server thread.
+        pthread_t main_thread;
+        pthread_create(&main_thread, NULL, &startServer, NULL);
 
-        switch(mode) {
-            case 1:
-                fifo();
-                break;
-            case 2:
-                forked();
-                break;
-            case 3:
-                threaded();
-                break;
-            case 4:
-                preForked();
-                break;
-            case 5:
-                preThreaded();
-                break;
-            default :
-                printf("Modo inválido.\n\n");
-        }
+        //Waits until the user enters the exit word.
+        while(scanf("%s", userInput),!isFin());
+        if(mode == 4) kill(0, SIGTERM);
     }
     return 0;
 }
