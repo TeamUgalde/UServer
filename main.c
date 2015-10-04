@@ -10,8 +10,8 @@
 #include <sys/mman.h>
 
 #define BACKLOG 64
-#define BUFFER_SIZE 8096
-#define MAX_REQUESTS 100
+#define BUFFER_SIZE 16192
+#define MAX_REQUESTS 1000
 
 //File name and the number of times that it has been requested.
 typedef struct file {
